@@ -2,8 +2,10 @@
 import scrapy
 import json
 import re
+import pandas as pd
 from ..items import ZhihuSpiderItem
 import time
+
 
 class ImageSpider(scrapy.Spider):
     count = 0
@@ -40,6 +42,8 @@ class ImageSpider(scrapy.Spider):
             19561625, 19575990, 19564412, 19565769, 19552207}
     words = ["女性", "漂亮", "美丽", "身材", "胸", "蹆", "化妆", "可爱", "性感", "美女", "姑娘", "女生", "裙子", "颜值",
              "择偶", "相亲", "妹子", "小姐姐"]
+    question_tags = {}          # 关注的问题标签
+    user_likes = {}             # 点赞的用户
 
     def start_requests(self):
         # 首先是登陆页面
@@ -48,23 +52,29 @@ class ImageSpider(scrapy.Spider):
             scrapy.http.Request(self.scroll_url, headers=self.headers)]
 
     def parse(self, response):
-        try:
-            js_obj = json.loads(response.body)
-            next_url = js_obj['paging']['next']
-            yield scrapy.Request(next_url, headers=self.headers, callback=self.parse)
-            for i in js_obj['data']:
-                if 'gender' in i['target']['author'].keys() and i['target']['author']['gender'] == 0:
-                        #and 'question' in i['target'].keys() \
-                        #and not set(i['target']['question']['bound_topic_ids']).isdisjoint(self.tags):
-                        for word in self.words:
-                            if 'question' in i['target'].keys() and word in i['target']['question']['title']:
-                                item = ZhihuSpiderItem()
-                                item['image_urls'] = re.findall(self.pattern, i['target']['content'])
-                                yield item
-                                break
-            self.log('continue scroll:--' + next_url)
-        except json.decoder.JSONDecodeError:
-            self.log('--JSON解析失败')
+        js_obj = json.loads(response.body)
+        next_url = js_obj['paging']['next']
+        for i in js_obj['data']:
+            if i['action_text'] == '赞同了回答':
+                if 'gender' in i['target']['author'].keys() and i['target']['author']['gender'] == 0 and \
+                        i['action_text'] == '赞同了回答':
+                    for word in self.words:
+                        if 'question' in i['target'].keys() and word in i['target']['question']['title']:
+                            item = ZhihuSpiderItem()
+                            item['image_urls'] = re.findall(self.pattern, i['target']['content'])
+                            yield item
+                            break
+                temp = i['target']['question']['url']
+                tags = yield scrapy.Request(temp, headers=self.headers, callback=self.parse_question)
+        yield scrapy.Request(next_url, headers=self.headers, callback=self.parse)
 
-
+    def parse_question(self, response):
+        i = 3
+        while response.xpath('//*[@id="Popover%s-content"]' % i).get():
+            tag = response.xpath('//*[@id="Popover%s-content"]' % i).get()
+            if tag in self.question_tags:
+                self.question_tags['tag'] += 1
+            else:
+                self.question_tags['tag'] = 1
+            i += 1
 
